@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = 'https://akzfkofiephdhqkqsboc.supabase.co';
 const supabaseKey = 'sb_publishable_nczB0oTnr8ZbB5-eTy3oHg_-QjvoMDk';
 const supabase = createClient(supabaseUrl, supabaseKey);
-const supabase = createClient(supabaseUrl, supabaseKey);
+
 import { 
   Users, 
   BarChart3, 
@@ -53,9 +53,9 @@ import {
 // ─── Supabase Client ────────────────────────────────────────────────────────
 // Replace these with your actual Supabase project URL and anon key
 // Tip: move these to a .env file as VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? 'YOUR_SUPABASE_URL';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'YOUR_SUPABASE_ANON_KEY';
-const supabase = createClient(supabaseUrl, supabaseKey);
+//const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? 'YOUR_SUPABASE_URL';
+//const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'YOUR_SUPABASE_ANON_KEY';
+//const supabase = createClient(supabaseUrl, supabaseKey);
 // ────────────────────────────────────────────────────────────────────────────
 
 const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
