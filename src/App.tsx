@@ -157,7 +157,10 @@ export default function App() {
 
   // ─── SAVE DATA TO SUPABASE WHENEVER STATE CHANGES ──────────────────────────
   // Using a debounced save so we don't hammer Supabase on every keystroke
- useEffect(() => {
+useEffect(() => {
+
+  if (isLoading) return; // ⭐ prevents wiping data on refresh
+
   const saveData = async () => {
     const payload = {
       students,
@@ -173,7 +176,8 @@ export default function App() {
   };
 
   saveData();
-}, [students, assessments, marks, groups, yearBoundaries]);
+
+}, [students, assessments, marks, groups, yearBoundaries, isLoading]);
 
  
 
