@@ -173,6 +173,7 @@ useEffect(() => {
     await supabase
       .from("app_data")
       .upsert({ id: 1, data: payload });
+    console.log("Saving to Supabase", payload);
   };
 
   saveData();
