@@ -84,7 +84,20 @@ export default function App() {
   const [assessments, setAssessments] = useState<Assessment[]>(INITIAL_ASSESSMENTS);
   const [marks, setMarks] = useState<Mark[]>(INITIAL_MARKS);
 useEffect(() => {
-  const saved = localStorage.getItem("science_tracker_data");
+  //const saved = localStorage.getItem("science_tracker_data");
+  const { data } = await supabase
+  .from("app_data")
+  .select("*")
+  .eq("id", 1)
+  .single();
+  if (data?.data) {
+  const parsed = data.data;
+  setStudents(parsed.students || []);
+  setAssessments(parsed.assessments || []);
+  setMarks(parsed.marks || []);
+  setGroups(parsed.groups || []);
+  setYearBoundaries(parsed.yearBoundaries || {});
+}
 
   if (saved) {
     try {
@@ -312,7 +325,10 @@ useEffect(() => {
     yearBoundaries
   };
 
-  localStorage.setItem("science_tracker_data", JSON.stringify(data));
+ // localStorage.setItem("science_tracker_data", JSON.stringify(data));
+  await supabase
+  .from("app_data")
+  .upsert({ id: 1, data });
 }, [students, assessments, marks, groups, yearBoundaries]);
 
   const individualStudentTrendData = useMemo(() => {
