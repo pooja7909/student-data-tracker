@@ -168,19 +168,10 @@ useEffect(() => {
   // ─── SAVE DATA TO SUPABASE WHENEVER STATE CHANGES ──────────────────────────
   // Using a debounced save so we don't hammer Supabase on every keystroke
 useEffect(() => {
-
-  if (
-    isLoading ||
-    !dataLoaded ||
-    (students.length === 0 &&
-     assessments.length === 0 &&
-     marks.length === 0)
-  ) return;
+  if (isLoading) return;
 
   const saveData = async () => {
     try {
-      setSaveStatus("saving");
-
       const payload = {
         students,
         assessments,
@@ -191,27 +182,20 @@ useEffect(() => {
 
       const { error } = await supabase
         .from("app_data")
-        .upsert(
-          { id: 1, data: payload },
-          { onConflict: "id" }
-        );
+        .upsert({ id: 1, data: payload }, { onConflict: "id" });
 
-      if (error) throw error;
-
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-
+      if (error) {
+        console.error("Save failed:", error);
+      }
     } catch (err) {
-      console.error("Supabase save error:", err);
-      setSaveStatus("error");
+      console.error("Save error:", err);
     }
   };
 
   const timer = setTimeout(saveData, 1000);
-
   return () => clearTimeout(timer);
 
-}, [students, assessments, marks, groups, yearBoundaries, isLoading, dataLoaded]);
+}, [students, assessments, marks, groups, yearBoundaries, isLoading]);
  
 
   // Helper for year group display
