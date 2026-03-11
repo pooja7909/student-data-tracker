@@ -127,31 +127,39 @@ export default function App() {
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
 
   // ─── LOAD DATA FROM SUPABASE ON MOUNT ──────────────────────────────────────
- useEffect(() => {
-  const loadData = async () => {
-    const { data, error } = await supabase
-      .from("app_data")
-      .select("*")
-      .eq("id", 1)
-      .single();
+const loadData = async () => {
+  const { data, error } = await supabase
+    .from("app_data")
+    .select("*")
+    .eq("id", 1)
+    .single();
 
-    if (error) {
-      console.error(error);
-    }
+  if (error) {
+    console.error("Supabase load error:", error);
+    setIsLoading(false);
+    return;
+  }
 
-    if (data?.data) {
-      const parsed = data.data;
+  if (data?.data) {
+    const parsed = data.data;
 
-      setStudents(parsed.students || []);
-      setAssessments(parsed.assessments || []);
-      setMarks(parsed.marks || []);
-      setGroups(parsed.groups || []);
-      setYearBoundaries(parsed.yearBoundaries || {});
-    }
+    setStudents(parsed.students || []);
+    setAssessments(parsed.assessments || []);
+    setMarks(parsed.marks || []);
+    setGroups(parsed.groups || []);
+    setYearBoundaries(parsed.yearBoundaries || {
+      7: [...DEFAULT_BOUNDARIES],
+      8: [...DEFAULT_BOUNDARIES],
+      9: [...DEFAULT_BOUNDARIES],
+      "10 IGCSE": [...DEFAULT_BOUNDARIES],
+      "11 IGCSE": [...DEFAULT_BOUNDARIES],
+      "12 IB": [...DEFAULT_BOUNDARIES],
+      "13 IB": [...DEFAULT_BOUNDARIES],
+    });
+  }
 
-    setIsLoading(false); // ⭐ ADD THIS
-  };
-
+  setIsLoading(false);
+};
   loadData();
 }, []);
 
@@ -159,27 +167,43 @@ export default function App() {
   // Using a debounced save so we don't hammer Supabase on every keystroke
 useEffect(() => {
 
-  if (isLoading) return; // ⭐ prevents wiping data on refresh
+  if (isLoading) return;
 
   const saveData = async () => {
-    const payload = {
-      students,
-      assessments,
-      marks,
-      groups,
-      yearBoundaries
-    };
+    try {
+      setSaveStatus("saving");
 
-    await supabase
-      .from("app_data")
-      .upsert({ id: 1, data: payload });
-    console.log("Saving to Supabase", payload);
+      const payload = {
+        students,
+        assessments,
+        marks,
+        groups,
+        yearBoundaries
+      };
+
+      const { error } = await supabase
+        .from("app_data")
+        .upsert({ id: 1, data: payload });
+
+      if (error) throw error;
+
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+
+    } catch (err) {
+      console.error("Supabase save error:", err);
+      setSaveStatus("error");
+    }
   };
 
-  saveData();
+  // ⭐ debounce saves (wait 1 second before saving)
+  const timer = setTimeout(() => {
+    saveData();
+  }, 1000);
+
+  return () => clearTimeout(timer);
 
 }, [students, assessments, marks, groups, yearBoundaries, isLoading]);
-
  
 
   // Helper for year group display
