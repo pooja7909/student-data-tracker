@@ -169,7 +169,13 @@ useEffect(() => {
   // Using a debounced save so we don't hammer Supabase on every keystroke
 useEffect(() => {
 
-  if (isLoading) return;
+  if (
+    isLoading ||
+    !dataLoaded ||
+    (students.length === 0 &&
+     assessments.length === 0 &&
+     marks.length === 0)
+  ) return;
 
   const saveData = async () => {
     try {
@@ -185,7 +191,10 @@ useEffect(() => {
 
       const { error } = await supabase
         .from("app_data")
-        .upsert({ id: 1, data: payload });
+        .upsert(
+          { id: 1, data: payload },
+          { onConflict: "id" }
+        );
 
       if (error) throw error;
 
@@ -198,14 +207,11 @@ useEffect(() => {
     }
   };
 
-  // ⭐ debounce saves (wait 1 second before saving)
-  const timer = setTimeout(() => {
-    saveData();
-  }, 1000);
+  const timer = setTimeout(saveData, 1000);
 
   return () => clearTimeout(timer);
 
-}, [students, assessments, marks, groups, yearBoundaries, isLoading]);
+}, [students, assessments, marks, groups, yearBoundaries, isLoading, dataLoaded]);
  
 
   // Helper for year group display
