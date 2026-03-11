@@ -128,63 +128,51 @@ export default function App() {
 
   // ─── LOAD DATA FROM SUPABASE ON MOUNT ──────────────────────────────────────
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('app_data')
-          .select('*')
-          .eq('id', 1)
-          .single();
+  const loadData = async () => {
+    const { data, error } = await supabase
+      .from("app_data")
+      .select("*")
+      .eq("id", 1)
+      .single();
 
-        if (error && error.code !== 'PGRST116') {
-          // PGRST116 = row not found (first time use), anything else is a real error
-          console.error('Failed to load data from Supabase:', error);
-        }
+    if (error) {
+      console.error(error);
+      return;
+    }
 
-        if (data?.data) {
-          const parsed = data.data;
-          if (parsed.students) setStudents(parsed.students);
-          if (parsed.assessments) setAssessments(parsed.assessments);
-          if (parsed.marks) setMarks(parsed.marks);
-          if (parsed.groups) setGroups(parsed.groups);
-          if (parsed.yearBoundaries) setYearBoundaries(parsed.yearBoundaries);
-        }
-      } catch (err) {
-        console.error('Error loading data:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    if (data?.data) {
+      const parsed = data.data;
 
-    loadData();
-  }, []); // runs once on mount
+      setStudents(parsed.students || []);
+      setAssessments(parsed.assessments || []);
+      setMarks(parsed.marks || []);
+      setGroups(parsed.groups || []);
+      setYearBoundaries(parsed.yearBoundaries || {});
+    }
+  };
+
+  loadData();
+}, []);
 
   // ─── SAVE DATA TO SUPABASE WHENEVER STATE CHANGES ──────────────────────────
   // Using a debounced save so we don't hammer Supabase on every keystroke
- const saveData = useCallback(async (dataToSave: object) => {
-    setSaveStatus('saving');
-    try {
-      const { data, error } = await supabase
-        .from('app_data')
-        .upsert({ id: 1, data: dataToSave }, { onConflict: 'id' });
+ useEffect(() => {
+  const saveData = async () => {
+    const payload = {
+      students,
+      assessments,
+      marks,
+      groups,
+      yearBoundaries
+    };
 
-      console.log('SAVE RESULT:', data, 'ERROR:', error); // DEBUG LINE
+    await supabase
+      .from("app_data")
+      .upsert({ id: 1, data: payload });
+  };
 
-      if (error) {
-        console.error('Failed to save data:', error);
-        setSaveStatus('error');
-        setTimeout(() => setSaveStatus('idle'), 3000);
-      } else {
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      }
-    } catch (err) {
-      console.error('Error saving data:', err);
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
-    }
-  }, []);
+  saveData();
+}, [students, assessments, marks, groups, yearBoundaries]);
 
   useEffect(() => {
     // Don't save while still loading initial data (would overwrite with empty state)
