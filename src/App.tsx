@@ -1,4 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = 'https://akzfkofiephdhqkqsboc.supabase.co';
+const supabaseKey = 'sb_publishable_nczB0oTnr8ZbB5-eTy3oHg_-QjvoMDk';
+const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(supabaseUrl, supabaseKey);
 import { 
   Users, 
   BarChart3, 
