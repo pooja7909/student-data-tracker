@@ -162,12 +162,14 @@ export default function App() {
 
   // ─── SAVE DATA TO SUPABASE WHENEVER STATE CHANGES ──────────────────────────
   // Using a debounced save so we don't hammer Supabase on every keystroke
-  const saveData = useCallback(async (dataToSave: object) => {
+ const saveData = useCallback(async (dataToSave: object) => {
     setSaveStatus('saving');
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('app_data')
-        .upsert({ id: 1, data: dataToSave });
+        .upsert({ id: 1, data: dataToSave }, { onConflict: 'id' });
+
+      console.log('SAVE RESULT:', data, 'ERROR:', error); // DEBUG LINE
 
       if (error) {
         console.error('Failed to save data:', error);
