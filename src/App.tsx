@@ -127,7 +127,7 @@ export default function App() {
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
 
   // ─── LOAD DATA FROM SUPABASE ON MOUNT ──────────────────────────────────────
-  useEffect(() => {
+ useEffect(() => {
   const loadData = async () => {
     const { data, error } = await supabase
       .from("app_data")
@@ -137,7 +137,6 @@ export default function App() {
 
     if (error) {
       console.error(error);
-      return;
     }
 
     if (data?.data) {
@@ -149,6 +148,8 @@ export default function App() {
       setGroups(parsed.groups || []);
       setYearBoundaries(parsed.yearBoundaries || {});
     }
+
+    setIsLoading(false); // ⭐ ADD THIS
   };
 
   loadData();
@@ -174,17 +175,7 @@ export default function App() {
   saveData();
 }, [students, assessments, marks, groups, yearBoundaries]);
 
-  useEffect(() => {
-    // Don't save while still loading initial data (would overwrite with empty state)
-    if (isLoading) return;
-
-    const handler = setTimeout(() => {
-      saveData({ students, assessments, marks, groups, yearBoundaries });
-    }, 800); // debounce: wait 800ms after last change before saving
-
-    return () => clearTimeout(handler);
-  }, [students, assessments, marks, groups, yearBoundaries, isLoading, saveData]);
-  // ────────────────────────────────────────────────────────────────────────────
+ 
 
   // Helper for year group display
   const formatYearGroup = (y: YearGroup) => {
