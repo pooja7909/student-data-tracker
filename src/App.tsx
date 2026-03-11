@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Users, 
   BarChart3, 
@@ -33,6 +33,7 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
+import { createClient } from '@supabase/supabase-js';
 import { 
   Student, 
   Assessment, 
@@ -42,6 +43,14 @@ import {
   StudentPerformance,
   Group
 } from './types';
+
+// ─── Supabase Client ────────────────────────────────────────────────────────
+// Replace these with your actual Supabase project URL and anon key
+// Tip: move these to a .env file as VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? 'YOUR_SUPABASE_URL';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'YOUR_SUPABASE_ANON_KEY';
+const supabase = createClient(supabaseUrl, supabaseKey);
+// ────────────────────────────────────────────────────────────────────────────
 
 const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
   7: ['Science', 'Computer Science'],
@@ -54,12 +63,12 @@ const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
 };
 
 const SUBJECT_COLORS: Record<string, string> = {
-  'Science': '#6366f1', // Indigo
-  'Physics': '#3b82f6', // Blue
-  'Chemistry': '#10b981', // Emerald
-  'Biology': '#f59e0b', // Amber
-  'Computer Science': '#8b5cf6', // Violet
-  'ESS': '#ec4899', // Pink
+  'Science': '#6366f1',
+  'Physics': '#3b82f6',
+  'Chemistry': '#10b981',
+  'Biology': '#f59e0b',
+  'Computer Science': '#8b5cf6',
+  'ESS': '#ec4899',
 };
 
 const DEFAULT_BOUNDARIES: GradeBoundary[] = [
@@ -72,47 +81,12 @@ const DEFAULT_BOUNDARIES: GradeBoundary[] = [
   { grade: 'U', minPercentage: 0 },
 ];
 
-const INITIAL_STUDENTS: Student[] = [];
-
-const INITIAL_ASSESSMENTS: Assessment[] = [];
-
-const INITIAL_MARKS: Mark[] = [];
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'students' | 'assessments' | 'settings'>('dashboard');
-  const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
-  const [assessments, setAssessments] = useState<Assessment[]>(INITIAL_ASSESSMENTS);
-  const [marks, setMarks] = useState<Mark[]>(INITIAL_MARKS);
-useEffect(() => {
-  //const saved = localStorage.getItem("science_tracker_data");
-  const { data } = await supabase
-  .from("app_data")
-  .select("*")
-  .eq("id", 1)
-  .single();
-  if (data?.data) {
-  const parsed = data.data;
-  setStudents(parsed.students || []);
-  setAssessments(parsed.assessments || []);
-  setMarks(parsed.marks || []);
-  setGroups(parsed.groups || []);
-  setYearBoundaries(parsed.yearBoundaries || {});
-}
-
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-
-      if (parsed.students) setStudents(parsed.students);
-      if (parsed.assessments) setAssessments(parsed.assessments);
-      if (parsed.marks) setMarks(parsed.marks);
-      if (parsed.groups) setGroups(parsed.groups);
-      if (parsed.yearBoundaries) setYearBoundaries(parsed.yearBoundaries);
-    } catch (err) {
-      console.error("Failed to load saved data", err);
-    }
-  }
-}, []);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [yearBoundaries, setYearBoundaries] = useState<Record<YearGroup, GradeBoundary[]>>({
     7: [...DEFAULT_BOUNDARIES],
     8: [...DEFAULT_BOUNDARIES],
@@ -127,7 +101,7 @@ useEffect(() => {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [yearFilter, setYearFilter] = useState<YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL'>('all');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showAssessmentModal, setShowAssessmentModal] = useState(false);
   const [editingAssessmentId, setEditingAssessmentId] = useState<string | null>(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -148,6 +122,76 @@ useEffect(() => {
   const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
 
+  // ─── LOAD DATA FROM SUPABASE ON MOUNT ──────────────────────────────────────
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('app_data')
+          .select('*')
+          .eq('id', 1)
+          .single();
+
+        if (error && error.code !== 'PGRST116') {
+          // PGRST116 = row not found (first time use), anything else is a real error
+          console.error('Failed to load data from Supabase:', error);
+        }
+
+        if (data?.data) {
+          const parsed = data.data;
+          if (parsed.students) setStudents(parsed.students);
+          if (parsed.assessments) setAssessments(parsed.assessments);
+          if (parsed.marks) setMarks(parsed.marks);
+          if (parsed.groups) setGroups(parsed.groups);
+          if (parsed.yearBoundaries) setYearBoundaries(parsed.yearBoundaries);
+        }
+      } catch (err) {
+        console.error('Error loading data:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []); // runs once on mount
+
+  // ─── SAVE DATA TO SUPABASE WHENEVER STATE CHANGES ──────────────────────────
+  // Using a debounced save so we don't hammer Supabase on every keystroke
+  const saveData = useCallback(async (dataToSave: object) => {
+    setSaveStatus('saving');
+    try {
+      const { error } = await supabase
+        .from('app_data')
+        .upsert({ id: 1, data: dataToSave });
+
+      if (error) {
+        console.error('Failed to save data:', error);
+        setSaveStatus('error');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } else {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      }
+    } catch (err) {
+      console.error('Error saving data:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Don't save while still loading initial data (would overwrite with empty state)
+    if (isLoading) return;
+
+    const handler = setTimeout(() => {
+      saveData({ students, assessments, marks, groups, yearBoundaries });
+    }, 800); // debounce: wait 800ms after last change before saving
+
+    return () => clearTimeout(handler);
+  }, [students, assessments, marks, groups, yearBoundaries, isLoading, saveData]);
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Helper for year group display
   const formatYearGroup = (y: YearGroup) => {
     return typeof y === 'number' ? `Year ${y}` : y;
@@ -163,6 +207,7 @@ useEffect(() => {
 
   // Data Migration for old year formats
   useEffect(() => {
+    if (isLoading) return;
     const migrateYear = (y: any): YearGroup => {
       if (y === 10 || y === '10') return '10 IGCSE';
       if (y === 11 || y === '11') return '11 IGCSE';
@@ -180,7 +225,7 @@ useEffect(() => {
     if (JSON.stringify(migratedAssessments) !== JSON.stringify(assessments)) {
       setAssessments(migratedAssessments);
     }
-  }, [students, assessments]);
+  }, [students, assessments, isLoading]);
 
   // Derived Data
   const performances = useMemo(() => {
@@ -197,7 +242,6 @@ useEffect(() => {
       const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
       const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
 
-      // Trend calculation
       let trend: 'improving' | 'declining' | 'stable' = 'stable';
       if (studentMarks.length >= 2) {
         const last = (studentMarks[studentMarks.length - 1].score / studentMarks[studentMarks.length - 1].assessment.maxMarks) * 100;
@@ -206,7 +250,6 @@ useEffect(() => {
         else if (last < prev - 2) trend = 'declining';
       }
 
-      // Status calculation
       let status: 'excellent' | 'on-track' | 'needs-improvement' = 'on-track';
       const currentBoundaries = yearBoundaries[student.yearGroup];
       
@@ -285,7 +328,6 @@ useEffect(() => {
 
     const avg = performanceTabStats.reduce((acc, p) => acc + p.averagePercentage, 0) / performanceTabStats.length;
     
-    // Find most improved student from filtered set
     const studentTrends = performances
       .filter(p => performanceTabStats.some(ps => ps.student.id === p.student.id))
       .map(p => {
@@ -298,7 +340,6 @@ useEffect(() => {
 
     const mostImproved = studentTrends[0]?.improvement > 0 ? studentTrends[0] : null;
 
-    // Highest performing group
     const groupMap: Record<string, { total: number, count: number }> = {};
     performanceTabStats.forEach(p => {
       const key = p.student.groupName || 'General';
@@ -316,20 +357,6 @@ useEffect(() => {
       bestGroup
     };
   }, [performanceTabStats, performances]);
-useEffect(() => {
-  const data = {
-    students,
-    assessments,
-    marks,
-    groups,
-    yearBoundaries
-  };
-
- // localStorage.setItem("science_tracker_data", JSON.stringify(data));
-  await supabase
-  .from("app_data")
-  .upsert({ id: 1, data });
-}, [students, assessments, marks, groups, yearBoundaries]);
 
   const individualStudentTrendData = useMemo(() => {
     if (selectedStudentForPerformance === 'none') return [];
@@ -428,13 +455,7 @@ useEffect(() => {
   }, [performances]);
 
   const backupData = () => {
-    const data = {
-      students,
-      assessments,
-      marks,
-      groups,
-      yearBoundaries
-    };
+    const data = { students, assessments, marks, groups, yearBoundaries };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -513,20 +534,8 @@ useEffect(() => {
 
         const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
         
-        // Filter for columns that are likely scores (not metadata and contain numeric data)
-        const extraColumns = headers.filter(h => {
-          if (metadataHeaders.includes(normalizeKey(h))) return false;
-          
-          // Check if at least one row has a numeric value in this column
-          return data.some((row: any) => {
-            const val = row[h];
-            return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
-          });
-        });
-        
         setPendingImport({ data, fileName, sheetName });
         
-        // Try to guess year group from filename or data
         let guessedYear: YearGroup = 7;
         const yearMatch = fileName.match(/\b(7|8|9|10|11|12|13)\b/i);
         if (yearMatch) {
@@ -542,6 +551,14 @@ useEffect(() => {
           if (fileName.includes('12')) guessedYear = '12 IB';
           else if (fileName.includes('13')) guessedYear = '13 IB';
         }
+
+        const extraColumns = headers.filter(h => {
+          if (metadataHeaders.includes(normalizeKey(h))) return false;
+          return data.some((row: any) => {
+            const val = row[h];
+            return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
+          });
+        });
         
         setImportConfig({
           yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
@@ -600,7 +617,6 @@ useEffect(() => {
     const newAssessments: Assessment[] = [...assessments];
     const newGroups: Group[] = [...groups];
 
-    // Ensure group exists
     let group = newGroups.find(g => g.name === groupName && g.yearGroup === yearGroup);
     if (!group) {
       group = {
@@ -623,27 +639,23 @@ useEffect(() => {
       let name = header;
       let maxMarks = defaultMaxMarks;
 
-      // 1. Extract marks from header: "Topic 1 (29)"
       const marksMatch = header.match(/\((\d+)\)/);
       if (marksMatch) {
         maxMarks = parseInt(marksMatch[1]);
         name = header.replace(marksMatch[0], '').trim();
       }
 
-      // 2. Check for sub-header in the first row of data
       if (rowData && rowData[header]) {
         const subVal = String(rowData[header]);
         const subMarksMatch = subVal.match(/\((\d+)\)/);
         if (subMarksMatch) {
           maxMarks = parseInt(subMarksMatch[1]);
-          // If the main header was generic, use the subheader name
           if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
             name = subVal.replace(subMarksMatch[0], '').trim() || name;
           }
         }
       }
 
-      // 3. Handle __EMPTY or generic names
       if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
         name = sheetName || 'Test Topic';
       }
@@ -666,7 +678,6 @@ useEffect(() => {
       });
     });
 
-    // Check if the first row is a sub-header (contains marks in parentheses)
     const firstRow = data[0];
     const isFirstRowSubHeader = firstRow && scoreColumns.some(col => String(firstRow[col]).includes('('));
     const dataToProcess = isFirstRowSubHeader ? data.slice(1) : data;
@@ -677,7 +688,6 @@ useEffect(() => {
 
       const rowSheetName = row.__sheetName || defaultSheetName;
 
-      // Ensure student exists
       let student = newStudents.find(s => s.name === studentName && s.yearGroup === yearGroup);
       if (!student) {
         student = { 
@@ -692,7 +702,6 @@ useEffect(() => {
       }
 
       if (hasAssessmentNameColumn) {
-        // Row-based assessments
         const rowAssessmentName = findValue(row, ['assessmentname']) || defaultAssessmentName;
         const rowSubject = findValue(row, ['subject']) || defaultSubject;
         const rowMaxMarks = parseFloat(findValue(row, ['maxmarks'])) || defaultMaxMarks;
@@ -720,7 +729,6 @@ useEffect(() => {
           newMarks.push({ studentId: student!.id, assessmentId: assessment.id, score: rowScore });
         }
       } else if (scoreColumns.length > 0) {
-        // Column-based assessments
         scoreColumns.forEach(col => {
           if (row[col] === undefined) return;
           
@@ -751,7 +759,6 @@ useEffect(() => {
           }
         });
       } else {
-        // Single assessment fallback
         const rowScoreRaw = parseFloat(findValue(row, ['score', 'mark'])) || 0;
         const rowScore = Math.min(defaultMaxMarks, Math.max(0, rowScoreRaw));
         let assessment = newAssessments.find(a => a.name === defaultAssessmentName && a.yearGroup === yearGroup);
@@ -783,8 +790,6 @@ useEffect(() => {
     
     setShowImportModal(false);
     setPendingImport(null);
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
   const handleAddAssessment = (e: React.FormEvent) => {
@@ -802,11 +807,7 @@ useEffect(() => {
     }
     setShowAssessmentModal(false);
     setEditingAssessmentId(null);
-    setNewAssessment(prev => ({ 
-      ...prev,
-      name: '', 
-      // Keep subject, maxMarks, date, and yearGroup for convenience
-    }));
+    setNewAssessment(prev => ({ ...prev, name: '' }));
   };
 
   const handleAddStudent = (e: React.FormEvent) => {
@@ -817,7 +818,7 @@ useEffect(() => {
     };
     setStudents(prev => [...prev, student]);
     setShowStudentModal(false);
-    setNewStudent(prev => ({ ...prev, name: '' })); // Keep yearGroup and groupName
+    setNewStudent(prev => ({ ...prev, name: '' }));
   };
 
   const handleAddGrade = (isAssessment: boolean = false, assessmentId?: string) => {
@@ -872,6 +873,19 @@ useEffect(() => {
     }
   };
 
+  // ─── LOADING SCREEN ─────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-slate-600 font-medium">Loading your data...</p>
+        </div>
+      </div>
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
@@ -911,6 +925,18 @@ useEffect(() => {
           </nav>
 
           <div className="flex items-center gap-3">
+            {/* Save status indicator */}
+            <div className={`text-xs font-medium px-2 py-1 rounded-lg transition-all ${
+              saveStatus === 'saving' ? 'text-amber-600 bg-amber-50' :
+              saveStatus === 'saved' ? 'text-emerald-600 bg-emerald-50' :
+              saveStatus === 'error' ? 'text-rose-600 bg-rose-50' :
+              'text-transparent'
+            }`}>
+              {saveStatus === 'saving' ? '● Saving...' :
+               saveStatus === 'saved' ? '✓ Saved' :
+               saveStatus === 'error' ? '✗ Save failed' : '·'}
+            </div>
+
             <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Year Group</span>
               <select 
@@ -1057,9 +1083,7 @@ useEffect(() => {
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                         <XAxis type="number" domain={[0, 100]} hide />
                         <YAxis dataKey="subject" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} width={100} />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
                         <Bar dataKey="average" radius={[0, 4, 4, 0]} barSize={30}>
                           {subjectPerformanceData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={SUBJECT_COLORS[entry.subject] || '#6366f1'} />
@@ -1078,10 +1102,7 @@ useEffect(() => {
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} domain={[0, 100]} />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                          cursor={{ fill: '#f8fafc' }}
-                        />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} cursor={{ fill: '#f8fafc' }} />
                         <Bar dataKey="average" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={40} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1096,10 +1117,7 @@ useEffect(() => {
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="group" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} domain={[0, 100]} />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                          cursor={{ fill: '#f8fafc' }}
-                        />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} cursor={{ fill: '#f8fafc' }} />
                         <Bar dataKey="average" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={40} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1215,7 +1233,6 @@ useEffect(() => {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Left Column: Top Performers & Needs Support */}
                 <div className="lg:col-span-1 space-y-6">
                   <div className="card p-6 bg-gradient-to-b from-white to-emerald-50/30">
                     <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -1309,7 +1326,6 @@ useEffect(() => {
                   </div>
                 </div>
 
-                {/* Right Column: Detailed Charts */}
                 <div className="lg:col-span-3 space-y-6">
                   {selectedStudentForPerformance !== 'none' && (
                     <motion.div 
@@ -1323,10 +1339,7 @@ useEffect(() => {
                         </span>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Personal Trend</span>
-                          <button 
-                            onClick={() => setSelectedStudentForPerformance('none')}
-                            className="text-slate-400 hover:text-slate-600"
-                          >
+                          <button onClick={() => setSelectedStudentForPerformance('none')} className="text-slate-400 hover:text-slate-600">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -1341,18 +1354,8 @@ useEffect(() => {
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                            <XAxis 
-                              dataKey="date" 
-                              axisLine={false} 
-                              tickLine={false} 
-                              tick={{ fill: '#64748b', fontSize: 11 }} 
-                            />
-                            <YAxis 
-                              axisLine={false} 
-                              tickLine={false} 
-                              tick={{ fill: '#64748b', fontSize: 11 }} 
-                              domain={[0, 100]} 
-                            />
+                            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
                             <Tooltip 
                               contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                               formatter={(value: number, name: string, props: any) => [
@@ -1360,16 +1363,7 @@ useEffect(() => {
                                 `${props.payload.assessmentName} (${props.payload.subject})`
                               ]}
                             />
-                            <Area 
-                              type="monotone" 
-                              dataKey="score" 
-                              stroke="#6366f1" 
-                              strokeWidth={3}
-                              fillOpacity={1} 
-                              fill="url(#colorScore)" 
-                              dot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#6366f1' }}
-                              activeDot={{ r: 6, strokeWidth: 0 }}
-                            />
+                            <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" dot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#6366f1' }} activeDot={{ r: 6, strokeWidth: 0 }} />
                           </AreaChart>
                         </ResponsiveContainer>
                       </div>
@@ -1385,37 +1379,14 @@ useEffect(() => {
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={subjectTrendData.filter(d => performanceSubjectFilter === 'all' || d.subject === performanceSubjectFilter)}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis 
-                            dataKey="date" 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{ fill: '#64748b', fontSize: 11 }} 
-                          />
-                          <YAxis 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{ fill: '#64748b', fontSize: 11 }} 
-                            domain={[0, 100]} 
-                          />
-                          <Tooltip 
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                            labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
-                          />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
+                          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }} />
                           <Legend verticalAlign="top" align="right" iconType="circle" height={36}/>
                           {(Array.from(new Set(subjectTrendData.map(d => d.subject))) as string[])
                             .filter(subject => performanceSubjectFilter === 'all' || subject === performanceSubjectFilter)
                             .map((subject) => (
-                            <Line 
-                              key={subject}
-                              type="monotone" 
-                              dataKey="average" 
-                              data={subjectTrendData.filter(d => d.subject === subject)}
-                              name={subject}
-                              stroke={SUBJECT_COLORS[subject] || '#6366f1'} 
-                              strokeWidth={3}
-                              dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
-                              activeDot={{ r: 6, strokeWidth: 0 }}
-                            />
+                            <Line key={subject} type="monotone" dataKey="average" data={subjectTrendData.filter(d => d.subject === subject)} name={subject} stroke={SUBJECT_COLORS[subject] || '#6366f1'} strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} />
                           ))}
                         </LineChart>
                       </ResponsiveContainer>
@@ -1434,9 +1405,7 @@ useEffect(() => {
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                             <XAxis type="number" domain={[0, 100]} hide />
                             <YAxis dataKey="subject" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
-                            <Tooltip 
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                            />
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
                             <Bar dataKey="average" radius={[0, 4, 4, 0]} barSize={20}>
                               {subjectPerformanceData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={SUBJECT_COLORS[entry.subject] || '#6366f1'} />
@@ -1458,9 +1427,7 @@ useEffect(() => {
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                             <XAxis dataKey="group" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
                             <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
-                            <Tooltip 
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                            />
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
                             <Bar dataKey="average" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={30} />
                           </BarChart>
                         </ResponsiveContainer>
@@ -1480,18 +1447,13 @@ useEffect(() => {
               exit={{ opacity: 0, x: -20 }}
               className="grid grid-cols-1 lg:grid-cols-3 gap-6"
             >
-              {/* Student List */}
               <div className="lg:col-span-1 space-y-4">
                 <div className="flex flex-col gap-2">
                   <button 
                     onClick={() => {
                       const defaultYear = (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') ? yearFilter : newStudent.yearGroup;
                       const firstGroup = groups.find(g => g.yearGroup === defaultYear)?.name || '';
-                      setNewStudent(prev => ({ 
-                        ...prev, 
-                        yearGroup: defaultYear, 
-                        groupName: prev.groupName || firstGroup 
-                      }));
+                      setNewStudent(prev => ({ ...prev, yearGroup: defaultYear, groupName: prev.groupName || firstGroup }));
                       setShowStudentModal(true);
                     }}
                     className="btn-primary w-full flex items-center justify-center gap-2"
@@ -1570,7 +1532,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Student Detail */}
               <div className="lg:col-span-2">
                 {selectedStudentId ? (
                   <div className="space-y-6">
@@ -1591,7 +1552,7 @@ useEffect(() => {
                                 score: (m.score / m.assessment.maxMarks) * 100
                               }))}>
                                 <defs>
-                                  <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                                  <linearGradient id="colorScore2" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
                                     <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
                                   </linearGradient>
@@ -1599,10 +1560,8 @@ useEffect(() => {
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
                                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
-                                <Tooltip 
-                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Area type="monotone" dataKey="score" stroke="#4f46e5" fillOpacity={1} fill="url(#colorScore)" strokeWidth={2} />
+                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                <Area type="monotone" dataKey="score" stroke="#4f46e5" fillOpacity={1} fill="url(#colorScore2)" strokeWidth={2} />
                               </AreaChart>
                             </ResponsiveContainer>
                           </div>
@@ -1834,7 +1793,6 @@ useEffect(() => {
                 {yearBoundaries[selectedYearForSettings]
                   .sort((a, b) => b.minPercentage - a.minPercentage)
                   .map((boundary, idx) => {
-                    // Find original index for state updates
                     const originalIdx = yearBoundaries[selectedYearForSettings].indexOf(boundary);
                     return (
                       <div key={idx} className="p-4 flex items-center justify-between gap-4">
@@ -1857,9 +1815,7 @@ useEffect(() => {
                               <span className="text-slate-500">Minimum Percentage</span>
                               <div className="flex items-center gap-1">
                                 <input 
-                                  type="number"
-                                  min="0"
-                                  max="100"
+                                  type="number" min="0" max="100"
                                   value={boundary.minPercentage}
                                   onChange={(e) => {
                                     const val = parseInt(e.target.value) || 0;
@@ -1873,9 +1829,7 @@ useEffect(() => {
                               </div>
                             </div>
                             <input 
-                              type="range" 
-                              min="0" 
-                              max="100" 
+                              type="range" min="0" max="100" 
                               value={boundary.minPercentage}
                               onChange={(e) => {
                                 const newBoundaries = [...yearBoundaries[selectedYearForSettings]];
@@ -1914,23 +1868,13 @@ useEffect(() => {
                 >
                   Reset to Defaults
                 </button>
-                <button 
-                  onClick={() => {
-                    setSaveStatus('saving');
-                    setTimeout(() => setSaveStatus('saved'), 600);
-                    setTimeout(() => setSaveStatus('idle'), 3000);
-                  }}
-                  className="btn-primary min-w-[120px]"
-                >
-                  {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved!' : 'Save Changes'}
-                </button>
               </div>
 
               <div className="pt-8 border-t border-slate-100">
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 mb-2">Manage Groups</h2>
-                    <p className="text-slate-500">View and organize classes for Year {selectedYearForSettings}. Groups are automatically created when you import marks.</p>
+                    <p className="text-slate-500">View and organize classes. Groups are automatically created when you import marks.</p>
                   </div>
                 </div>
 
@@ -1946,7 +1890,6 @@ useEffect(() => {
                           onChange={(e) => {
                             const newName = e.target.value;
                             setGroups(prev => prev.map(g => g.id === group.id ? { ...g, name: newName } : g));
-                            // Also update students in this group
                             setStudents(prev => prev.map(s => s.yearGroup === selectedYearForSettings && s.groupName === group.name ? { ...s, groupName: newName } : s));
                           }}
                         />
@@ -1970,25 +1913,20 @@ useEffect(() => {
                 <div className="card p-6 bg-indigo-50 border-indigo-100">
                   <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                     <div className="space-y-4 flex-1">
-                      <div className="flex items-center gap-3 text-indigo-700">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold">1</div>
-                        <p className="font-medium">Download the template to see the required format.</p>
-                      </div>
-                      <div className="flex items-center gap-3 text-indigo-700">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold">2</div>
-                        <p className="font-medium">Fill in student names, year groups, class names, and marks.</p>
-                      </div>
-                      <div className="flex items-center gap-3 text-indigo-700">
-                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold">3</div>
-                        <p className="font-medium">Upload the completed CSV to automatically organize your data.</p>
-                      </div>
+                      {[
+                        'Download the template to see the required format.',
+                        'Fill in student names, year groups, class names, and marks.',
+                        'Upload the completed CSV to automatically organize your data.'
+                      ].map((step, i) => (
+                        <div key={i} className="flex items-center gap-3 text-indigo-700">
+                          <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold">{i + 1}</div>
+                          <p className="font-medium">{step}</p>
+                        </div>
+                      ))}
                     </div>
                     
                     <div className="flex flex-col gap-3 w-full md:w-auto">
-                      <button 
-                        onClick={downloadTemplate}
-                        className="btn-primary flex items-center justify-center gap-2"
-                      >
+                      <button onClick={downloadTemplate} className="btn-primary flex items-center justify-center gap-2">
                         <Download className="w-4 h-4" />
                         Download Template
                       </button>
@@ -2040,11 +1978,7 @@ useEffect(() => {
                       onChange={e => {
                         const val = e.target.value;
                         const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
-                        setNewAssessment({
-                          ...newAssessment, 
-                          yearGroup: year,
-                          subject: SUBJECTS_BY_YEAR[year][0]
-                        });
+                        setNewAssessment({ ...newAssessment, yearGroup: year, subject: SUBJECTS_BY_YEAR[year][0] });
                       }}
                     >
                       {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
@@ -2068,8 +2002,7 @@ useEffect(() => {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Assessment Name</label>
                   <input 
-                    required
-                    type="text" 
+                    required type="text" 
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                     value={newAssessment.name}
                     onChange={e => setNewAssessment({...newAssessment, name: e.target.value})}
@@ -2079,8 +2012,7 @@ useEffect(() => {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Max Marks</label>
                     <input 
-                      required
-                      type="number" 
+                      required type="number" 
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                       value={newAssessment.maxMarks}
                       onChange={e => setNewAssessment({...newAssessment, maxMarks: parseInt(e.target.value)})}
@@ -2089,8 +2021,7 @@ useEffect(() => {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
                     <input 
-                      required
-                      type="date" 
+                      required type="date" 
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                       value={newAssessment.date}
                       onChange={e => setNewAssessment({...newAssessment, date: e.target.value})}
@@ -2098,17 +2029,7 @@ useEffect(() => {
                   </div>
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      setShowAssessmentModal(false);
-                      setEditingAssessmentId(null);
-                      // We don't reset to Year 7 here anymore to preserve context
-                    }} 
-                    className="btn-secondary flex-1"
-                  >
-                    Cancel
-                  </button>
+                  <button type="button" onClick={() => { setShowAssessmentModal(false); setEditingAssessmentId(null); }} className="btn-secondary flex-1">Cancel</button>
                   <button type="submit" className="btn-primary flex-1">
                     {editingAssessmentId ? 'Update Assessment' : 'Add Assessment'}
                   </button>
@@ -2131,8 +2052,7 @@ useEffect(() => {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label>
                   <input 
-                    required
-                    type="text" 
+                    required type="text" 
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                     value={newStudent.name}
                     onChange={e => setNewStudent({...newStudent, name: e.target.value})}
@@ -2297,9 +2217,7 @@ useEffect(() => {
                                   <span className="text-slate-500">Min %</span>
                                   <div className="flex items-center gap-1">
                                     <input 
-                                      type="number"
-                                      min="0"
-                                      max="100"
+                                      type="number" min="0" max="100"
                                       value={boundary.minPercentage}
                                       onChange={(e) => {
                                         const val = parseInt(e.target.value) || 0;
@@ -2313,9 +2231,7 @@ useEffect(() => {
                                   </div>
                                 </div>
                                 <input 
-                                  type="range" 
-                                  min="0" 
-                                  max="100" 
+                                  type="range" min="0" max="100" 
                                   value={boundary.minPercentage}
                                   onChange={(e) => {
                                     const currentBoundaries = [...sourceBoundaries];
@@ -2355,6 +2271,7 @@ useEffect(() => {
             </motion.div>
           </div>
         )}
+
         {showImportModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
             <motion.div 
@@ -2455,18 +2372,12 @@ useEffect(() => {
 
               <div className="flex gap-3 mt-8">
                 <button 
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setPendingImport(null);
-                  }}
+                  onClick={() => { setShowImportModal(false); setPendingImport(null); }}
                   className="btn-secondary flex-1"
                 >
                   Cancel
                 </button>
-                <button 
-                  onClick={confirmImport}
-                  className="btn-primary flex-1"
-                >
+                <button onClick={confirmImport} className="btn-primary flex-1">
                   Import {pendingImport?.data.length} Rows
                 </button>
               </div>
@@ -2474,6 +2385,7 @@ useEffect(() => {
           </div>
         )}
       </AnimatePresence>
+
       <footer className="bg-white border-t border-slate-200 py-6 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-slate-500">© 2024 EduTracker Pro. All rights reserved.</p>
