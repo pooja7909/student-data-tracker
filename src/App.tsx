@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 
-import { Legend } from 'recharts';
+
 import { supabase } from './supabaseClient';
 
 import { 
