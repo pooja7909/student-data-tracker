@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { supabase } from './supabaseClient'
 import { 
   Users, 
   BarChart3, 
@@ -13,7 +12,8 @@ import {
   Trash2,
   Download,
   Search,
-  Filter
+  Filter,
+  X
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -31,6 +31,7 @@ import {
   Cell
 } from 'recharts';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Student, 
@@ -42,14 +43,14 @@ import {
   Group
 } from './types';
 
-const SUBJECTS_BY_YEAR: Record<number, string[]> = {
+const SUBJECTS_BY_YEAR: Record<YearGroup, string[]> = {
   7: ['Science', 'Computer Science'],
   8: ['Science', 'Computer Science'],
   9: ['Science', 'Computer Science'],
-  10: ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
-  11: ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
-  12: ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
-  13: ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
+  '10 IGCSE': ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
+  '11 IGCSE': ['Physics', 'Chemistry', 'Biology', 'Computer Science'],
+  '12 IB': ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
+  '13 IB': ['Physics', 'Chemistry', 'Biology', 'ESS', 'Computer Science'],
 };
 
 const SUBJECT_COLORS: Record<string, string> = {
@@ -78,31 +79,48 @@ const INITIAL_ASSESSMENTS: Assessment[] = [];
 const INITIAL_MARKS: Mark[] = [];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'assessments' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'performance' | 'students' | 'assessments' | 'settings'>('dashboard');
   const [students, setStudents] = useState<Student[]>(INITIAL_STUDENTS);
   const [assessments, setAssessments] = useState<Assessment[]>(INITIAL_ASSESSMENTS);
   const [marks, setMarks] = useState<Mark[]>(INITIAL_MARKS);
+useEffect(() => {
+  const saved = localStorage.getItem("science_tracker_data");
+
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+
+      if (parsed.students) setStudents(parsed.students);
+      if (parsed.assessments) setAssessments(parsed.assessments);
+      if (parsed.marks) setMarks(parsed.marks);
+      if (parsed.groups) setGroups(parsed.groups);
+      if (parsed.yearBoundaries) setYearBoundaries(parsed.yearBoundaries);
+    } catch (err) {
+      console.error("Failed to load saved data", err);
+    }
+  }
+}, []);
   const [yearBoundaries, setYearBoundaries] = useState<Record<YearGroup, GradeBoundary[]>>({
     7: [...DEFAULT_BOUNDARIES],
     8: [...DEFAULT_BOUNDARIES],
     9: [...DEFAULT_BOUNDARIES],
-    10: [...DEFAULT_BOUNDARIES],
-    11: [...DEFAULT_BOUNDARIES],
-    12: [...DEFAULT_BOUNDARIES],
-    13: [...DEFAULT_BOUNDARIES],
+    '10 IGCSE': [...DEFAULT_BOUNDARIES],
+    '11 IGCSE': [...DEFAULT_BOUNDARIES],
+    '12 IB': [...DEFAULT_BOUNDARIES],
+    '13 IB': [...DEFAULT_BOUNDARIES],
   });
   const [selectedYearForSettings, setSelectedYearForSettings] = useState<YearGroup>(7);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [yearFilter, setYearFilter] = useState<YearGroup | 'all'>('all');
+  const [yearFilter, setYearFilter] = useState<YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL'>('all');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showAssessmentModal, setShowAssessmentModal] = useState(false);
   const [editingAssessmentId, setEditingAssessmentId] = useState<string | null>(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [showMarksModal, setShowMarksModal] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string } | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string, sheetName?: string } | null>(null);
   const [importConfig, setImportConfig] = useState({ 
     yearGroup: 7 as YearGroup, 
     groupName: '', 
@@ -114,41 +132,42 @@ export default function App() {
   const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
   const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
   const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
-const [showImportModal, setShowImportModal] = useState(false);
-const [pendingImport, setPendingImport] = useState<{ data: any[], fileName: string } | null>(null);
-const [importConfig, setImportConfig] = useState({ 
-  yearGroup: 7 as YearGroup, 
-  groupName: '', 
-  assessmentName: '', 
-  subject: 'Science', 
-  maxMarks: 100, 
-  date: new Date().toISOString().split('T')[0] 
-});
-const [marksGroupFilter, setMarksGroupFilter] = useState<string>('all');
-const [newAssessment, setNewAssessment] = useState({ name: '', subject: 'Science', maxMarks: 100, date: new Date().toISOString().split('T')[0], yearGroup: 7 as YearGroup });
-const [newStudent, setNewStudent] = useState({ name: '', yearGroup: 7 as YearGroup, groupName: '' });
+  const [performanceSubjectFilter, setPerformanceSubjectFilter] = useState<string>('all');
+  const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
 
-/* ADD THE NEW CODE HERE */
+  // Helper for year group display
+  const formatYearGroup = (y: YearGroup) => {
+    return typeof y === 'number' ? `Year ${y}` : y;
+  };
 
-useEffect(() => {
-  loadData()
-}, [])
+  // Helper for year group matching
+  const matchesYearFilter = (itemYear: YearGroup, filter: YearGroup | 'all' | 'IGCSE_ALL' | 'IB_ALL') => {
+    if (filter === 'all') return true;
+    if (filter === 'IGCSE_ALL') return (itemYear as any) === 10 || (itemYear as any) === 11 || String(itemYear).includes('IGCSE');
+    if (filter === 'IB_ALL') return (itemYear as any) === 12 || (itemYear as any) === 13 || String(itemYear).includes('IB');
+    return itemYear === filter;
+  };
 
-async function loadData() {
-  const { data, error } = await supabase
-    .from('student_data')
-    .select('*')
+  // Data Migration for old year formats
+  useEffect(() => {
+    const migrateYear = (y: any): YearGroup => {
+      if (y === 10 || y === '10') return '10 IGCSE';
+      if (y === 11 || y === '11') return '11 IGCSE';
+      if (y === 12 || y === '12') return '12 IB';
+      if (y === 13 || y === '13') return '13 IB';
+      return y as YearGroup;
+    };
 
-  if (error) {
-    console.error("Error loading data:", error)
-    return
-  }
+    const migratedStudents = students.map(s => ({ ...s, yearGroup: migrateYear(s.yearGroup) }));
+    if (JSON.stringify(migratedStudents) !== JSON.stringify(students)) {
+      setStudents(migratedStudents);
+    }
 
-  console.log("Data from Supabase:", data)
-}
-
-// Derived Data
-const performances = useMemo(() => {
+    const migratedAssessments = assessments.map(a => ({ ...a, yearGroup: migrateYear(a.yearGroup) }));
+    if (JSON.stringify(migratedAssessments) !== JSON.stringify(assessments)) {
+      setAssessments(migratedAssessments);
+    }
+  }, [students, assessments]);
 
   // Derived Data
   const performances = useMemo(() => {
@@ -194,13 +213,149 @@ const performances = useMemo(() => {
   const filteredPerformances = useMemo(() => {
     return performances.filter(p => {
       const matchesSearch = p.student.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesYear = yearFilter === 'all' || p.student.yearGroup === yearFilter;
+      const matchesYear = matchesYearFilter(p.student.yearGroup, yearFilter);
       return matchesSearch && matchesYear;
     });
   }, [performances, searchQuery, yearFilter]);
 
+  const topPerformers = useMemo(() => {
+    return [...filteredPerformances]
+      .filter(p => p.marks.length > 0)
+      .sort((a, b) => b.averagePercentage - a.averagePercentage)
+      .slice(0, 5);
+  }, [filteredPerformances]);
+
+  const needsSupport = useMemo(() => {
+    return [...filteredPerformances]
+      .filter(p => p.marks.length > 0)
+      .sort((a, b) => a.averagePercentage - b.averagePercentage)
+      .slice(0, 5);
+  }, [filteredPerformances]);
+
+  const performanceTabStats = useMemo(() => {
+    return students.map(student => {
+      const studentMarks = marks
+        .filter(m => m.studentId === student.id)
+        .map(m => ({
+          ...m,
+          assessment: assessments.find(a => a.id === m.assessmentId)!
+        }))
+        .filter(m => m.assessment && (performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter))
+        .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
+        .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime());
+
+      const totalPercentage = studentMarks.reduce((acc, m) => acc + (m.score / m.assessment.maxMarks) * 100, 0);
+      const averagePercentage = studentMarks.length > 0 ? totalPercentage / studentMarks.length : 0;
+
+      return {
+        student,
+        averagePercentage,
+        count: studentMarks.length
+      };
+    }).filter(p => p.count > 0);
+  }, [students, assessments, marks, performanceSubjectFilter, yearFilter]);
+
+  const topPerformersList = useMemo(() => {
+    return [...performanceTabStats]
+      .sort((a, b) => b.averagePercentage - a.averagePercentage)
+      .slice(0, 5);
+  }, [performanceTabStats]);
+
+  const needsSupportList = useMemo(() => {
+    return [...performanceTabStats]
+      .sort((a, b) => a.averagePercentage - b.averagePercentage)
+      .slice(0, 5);
+  }, [performanceTabStats]);
+
+  const performanceInsights = useMemo(() => {
+    if (performanceTabStats.length === 0) return null;
+
+    const avg = performanceTabStats.reduce((acc, p) => acc + p.averagePercentage, 0) / performanceTabStats.length;
+    
+    // Find most improved student from filtered set
+    const studentTrends = performances
+      .filter(p => performanceTabStats.some(ps => ps.student.id === p.student.id))
+      .map(p => {
+        if (p.marks.length < 2) return { id: p.student.id, improvement: 0 };
+        const last = (p.marks[p.marks.length - 1].score / p.marks[p.marks.length - 1].assessment.maxMarks) * 100;
+        const first = (p.marks[0].score / p.marks[0].assessment.maxMarks) * 100;
+        return { id: p.student.id, name: p.student.name, improvement: last - first };
+      })
+      .sort((a, b) => b.improvement - a.improvement);
+
+    const mostImproved = studentTrends[0]?.improvement > 0 ? studentTrends[0] : null;
+
+    // Highest performing group
+    const groupMap: Record<string, { total: number, count: number }> = {};
+    performanceTabStats.forEach(p => {
+      const key = p.student.groupName || 'General';
+      if (!groupMap[key]) groupMap[key] = { total: 0, count: 0 };
+      groupMap[key].total += p.averagePercentage;
+      groupMap[key].count += 1;
+    });
+    const bestGroup = Object.entries(groupMap)
+      .map(([name, data]) => ({ name, avg: data.total / data.count }))
+      .sort((a, b) => b.avg - a.avg)[0];
+
+    return {
+      average: avg,
+      mostImproved,
+      bestGroup
+    };
+  }, [performanceTabStats, performances]);
+useEffect(() => {
+  const data = {
+    students,
+    assessments,
+    marks,
+    groups,
+    yearBoundaries
+  };
+
+  localStorage.setItem("science_tracker_data", JSON.stringify(data));
+}, [students, assessments, marks, groups, yearBoundaries]);
+
+  const individualStudentTrendData = useMemo(() => {
+    if (selectedStudentForPerformance === 'none') return [];
+    
+    return marks
+      .filter(m => m.studentId === selectedStudentForPerformance)
+      .map(m => ({
+        ...m,
+        assessment: assessments.find(a => a.id === m.assessmentId)!
+      }))
+      .filter(m => m.assessment && (performanceSubjectFilter === 'all' || m.assessment.subject === performanceSubjectFilter))
+      .filter(m => matchesYearFilter(m.assessment.yearGroup, yearFilter))
+      .sort((a, b) => new Date(a.assessment.date).getTime() - new Date(b.assessment.date).getTime())
+      .map(m => ({
+        date: new Date(m.assessment.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        score: (m.score / m.assessment.maxMarks) * 100,
+        assessmentName: m.assessment.name,
+        subject: m.assessment.subject
+      }));
+  }, [selectedStudentForPerformance, marks, assessments, performanceSubjectFilter, yearFilter]);
+
+  const subjectTrendData = useMemo(() => {
+    const relevantAssessments = assessments
+      .filter(a => matchesYearFilter(a.yearGroup, yearFilter))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    return relevantAssessments.map(assessment => {
+      const assessmentMarks = marks.filter(m => m.assessmentId === assessment.id);
+      const avg = assessmentMarks.length > 0
+        ? assessmentMarks.reduce((acc, m) => acc + (m.score / assessment.maxMarks) * 100, 0) / assessmentMarks.length
+        : 0;
+      return {
+        date: assessment.date,
+        name: assessment.name,
+        average: parseFloat(avg.toFixed(1)),
+        subject: assessment.subject
+      };
+    });
+  }, [assessments, marks, yearFilter]);
+
   const groupPerformanceData = useMemo(() => {
-    const relevantPerformances = yearFilter === 'all' ? performances : performances.filter(p => p.student.yearGroup === yearFilter);
+    const relevantPerformances = performances.filter(p => matchesYearFilter(p.student.yearGroup, yearFilter));
     const groupMap: Record<string, { total: number, count: number }> = {};
     
     relevantPerformances.forEach(p => {
@@ -240,26 +395,71 @@ const performances = useMemo(() => {
   }, [assessments, marks]);
 
   const classPerformanceData = useMemo(() => {
-    const yearGroups = [7, 8, 9, 10, 11, 12, 13] as YearGroup[];
-    return yearGroups.map(year => {
+    const yearGroups: YearGroup[] = [7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'];
+    return yearGroups
+      .filter(y => matchesYearFilter(y, yearFilter))
+      .map(year => {
       const yearPerformances = performances.filter(p => p.student.yearGroup === year);
       const avg = yearPerformances.length > 0 
         ? yearPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / yearPerformances.length 
         : 0;
       return {
-        year: `Year ${year}`,
+        year: typeof year === 'number' ? `Year ${year}` : year,
         average: parseFloat(avg.toFixed(1)),
         count: yearPerformances.length
       };
     }).filter(d => d.count > 0);
   }, [performances]);
 
+  const backupData = () => {
+    const data = {
+      students,
+      assessments,
+      marks,
+      groups,
+      yearBoundaries
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `science_tracker_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const restoreBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = JSON.parse(evt.target?.result as string);
+          if (data.students && data.assessments && data.marks) {
+            setStudents(data.students);
+            setAssessments(data.assessments);
+            setMarks(data.marks);
+            if (data.groups) setGroups(data.groups);
+            if (data.yearBoundaries) setYearBoundaries(data.yearBoundaries);
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 3000);
+          }
+        } catch (err) {
+          alert('Invalid backup file');
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const downloadTemplate = () => {
     const headers = ['studentName', 'yearGroup', 'groupName', 'assessmentName', 'subject', 'score', 'maxMarks', 'date'];
     const sampleData = [
-      ['John Doe', '10', '10-A', 'Midterm Exam', 'Physics', '85', '100', '2024-03-15'],
-      ['Jane Smith', '10', '10-A', 'Midterm Exam', 'Physics', '92', '100', '2024-03-15'],
-      ['Bob Wilson', '11', '11-B', 'Unit Test 1', 'Computer Science', '18', '20', '2024-03-10']
+      ['John Doe', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '85', '100', '2024-03-15'],
+      ['Jane Smith', '10 IGCSE', '10-A', 'Midterm Exam', 'Physics', '92', '100', '2024-03-15'],
+      ['Bob Wilson', '11 IGCSE', '11-B', 'Unit Test 1', 'Computer Science', '18', '20', '2024-03-10'],
+      ['Alice Brown', '12 IB', '12-C', 'Internal Assessment', 'Biology', '22', '24', '2024-03-20']
     ];
     
     const csvContent = [
@@ -282,59 +482,101 @@ const performances = useMemo(() => {
     const file = e.target.files?.[0];
     if (file) {
       const fileName = file.name.replace(/\.[^/.]+$/, "");
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          const data = results.data;
-          if (data.length === 0) return;
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
-          const headers = Object.keys(data[0]);
-          const metadataHeaders = [
-            'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
-            'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id'
-          ];
-          const hasAssessmentNameColumn = headers.some(h => h.toLowerCase() === 'assessmentname');
+      const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
+
+      const processData = (data: any[], sheetName?: string) => {
+        if (data.length === 0) return;
+
+        const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
+        const metadataHeaders = [
+          'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
+          'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
+        ].map(h => normalizeKey(h));
+
+        const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
+        
+        // Filter for columns that are likely scores (not metadata and contain numeric data)
+        const extraColumns = headers.filter(h => {
+          if (metadataHeaders.includes(normalizeKey(h))) return false;
           
-          // Filter for columns that are likely scores (not metadata and contain numeric data)
-          const extraColumns = headers.filter(h => {
-            const lowerH = h.toLowerCase();
-            if (metadataHeaders.includes(lowerH)) return false;
-            
-            // Check if at least one row has a numeric value in this column
-            return data.some((row: any) => {
-              const val = row[h];
-              return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
-            });
+          // Check if at least one row has a numeric value in this column
+          return data.some((row: any) => {
+            const val = row[h];
+            return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
           });
-          
-          setPendingImport({ data, fileName });
-          
-          // Try to guess year group from filename or data
-          let guessedYear: YearGroup = 7;
-          const yearMatch = fileName.match(/\b(7|8|9|10|11|12|13)\b/);
-          if (yearMatch) guessedYear = parseInt(yearMatch[0]) as YearGroup;
-          
-          setImportConfig({
-            yearGroup: yearFilter === 'all' ? guessedYear : yearFilter,
-            groupName: fileName,
-            assessmentName: hasAssessmentNameColumn ? 'Multiple (from CSV)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
-            subject: SUBJECTS_BY_YEAR[yearFilter === 'all' ? guessedYear : yearFilter][0],
-            maxMarks: 100,
-            date: new Date().toISOString().split('T')[0]
-          });
-          
-          setShowImportModal(true);
-          e.target.value = '';
+        });
+        
+        setPendingImport({ data, fileName, sheetName });
+        
+        // Try to guess year group from filename or data
+        let guessedYear: YearGroup = 7;
+        const yearMatch = fileName.match(/\b(7|8|9|10|11|12|13)\b/i);
+        if (yearMatch) {
+          const num = parseInt(yearMatch[0]);
+          if (num === 10 || num === 11) guessedYear = `${num} IGCSE` as YearGroup;
+          else if (num === 12 || num === 13) guessedYear = `${num} IB` as YearGroup;
+          else guessedYear = num as YearGroup;
         }
-      });
+        if (fileName.toLowerCase().includes('igcse')) {
+          if (fileName.includes('10')) guessedYear = '10 IGCSE';
+          else if (fileName.includes('11')) guessedYear = '11 IGCSE';
+        } else if (fileName.toLowerCase().includes('ib')) {
+          if (fileName.includes('12')) guessedYear = '12 IB';
+          else if (fileName.includes('13')) guessedYear = '13 IB';
+        }
+        
+        setImportConfig({
+          yearGroup: (yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter,
+          groupName: fileName,
+          assessmentName: hasAssessmentNameColumn ? 'Multiple (from File)' : (extraColumns.length > 0 ? 'Multiple Columns' : 'New Assessment'),
+          subject: SUBJECTS_BY_YEAR[(yearFilter === 'all' || yearFilter === 'IGCSE_ALL' || yearFilter === 'IB_ALL') ? guessedYear : yearFilter][0],
+          maxMarks: 100,
+          date: new Date().toISOString().split('T')[0]
+        });
+        
+        setShowImportModal(true);
+        e.target.value = '';
+      };
+
+      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const data = evt.target?.result;
+          const wb = XLSX.read(data, { type: 'array' });
+          
+          const allData: any[] = [];
+          wb.SheetNames.forEach(wsname => {
+            const ws = wb.Sheets[wsname];
+            const jsonData = XLSX.utils.sheet_to_json(ws);
+            if (jsonData.length > 0) {
+              jsonData.forEach((row: any) => {
+                row.__sheetName = wsname;
+              });
+              allData.push(...jsonData);
+            }
+          });
+          
+          processData(allData, wb.SheetNames[0]);
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            processData(results.data);
+          }
+        });
+      }
     }
   };
 
   const confirmImport = () => {
     if (!pendingImport) return;
 
-    const { data } = pendingImport;
+    const { data, sheetName: defaultSheetName } = pendingImport;
     const { yearGroup, groupName, assessmentName: defaultAssessmentName, subject: defaultSubject, maxMarks: defaultMaxMarks, date: defaultDate } = importConfig;
 
     const newMarks: Mark[] = [...marks];
@@ -353,24 +595,71 @@ const performances = useMemo(() => {
       newGroups.push(group);
     }
 
-    const headers = Object.keys(data[0]);
+    const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s_]/g, '');
+    const findValue = (row: any, possibleKeys: string[]) => {
+      const rowKeys = Object.keys(row);
+      const normalizedPossible = possibleKeys.map(k => normalizeKey(k));
+      const foundKey = rowKeys.find(rk => normalizedPossible.includes(normalizeKey(rk)));
+      return foundKey ? row[foundKey] : undefined;
+    };
+
+    const extractInfo = (header: string, rowData?: any, sheetName?: string) => {
+      let name = header;
+      let maxMarks = defaultMaxMarks;
+
+      // 1. Extract marks from header: "Topic 1 (29)"
+      const marksMatch = header.match(/\((\d+)\)/);
+      if (marksMatch) {
+        maxMarks = parseInt(marksMatch[1]);
+        name = header.replace(marksMatch[0], '').trim();
+      }
+
+      // 2. Check for sub-header in the first row of data
+      if (rowData && rowData[header]) {
+        const subVal = String(rowData[header]);
+        const subMarksMatch = subVal.match(/\((\d+)\)/);
+        if (subMarksMatch) {
+          maxMarks = parseInt(subMarksMatch[1]);
+          // If the main header was generic, use the subheader name
+          if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
+            name = subVal.replace(subMarksMatch[0], '').trim() || name;
+          }
+        }
+      }
+
+      // 3. Handle __EMPTY or generic names
+      if (name.startsWith('__EMPTY') || !name || name.toLowerCase() === 'score' || name.toLowerCase() === 'mark') {
+        name = sheetName || 'Test Topic';
+      }
+
+      return { name, maxMarks };
+    };
+
+    const headers: string[] = Array.from(new Set(data.flatMap((row: any) => Object.keys(row))));
     const metadataHeaders = [
       'studentname', 'name', 'student', 'yeargroup', 'year', 'groupname', 'group', 'class', 'subject', 'date', 'maxmarks', 'assessmentname', 'score', 'mark',
-      'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id'
-    ];
-    const hasAssessmentNameColumn = headers.some(h => h.toLowerCase() === 'assessmentname');
-    const scoreColumns = headers.filter(h => {
-      const lowerH = h.toLowerCase();
-      if (metadataHeaders.includes(lowerH)) return false;
+      'upn', 'uln', 'gender', 'dob', 'sen', 'pp', 'fsm', 'eal', 'ethnicity', 'notes', 'comments', 'attendance', 'email', 'id', 'mis_id', '__sheetname'
+    ].map(h => normalizeKey(h));
+
+    const hasAssessmentNameColumn = headers.some(h => normalizeKey(h) === 'assessmentname');
+    const scoreColumns: string[] = headers.filter(h => {
+      if (metadataHeaders.includes(normalizeKey(h))) return false;
       return data.some((row: any) => {
         const val = row[h];
         return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
       });
     });
 
-    data.forEach((row: any) => {
-      const studentName = row.studentName || row.name || row.Student;
+    // Check if the first row is a sub-header (contains marks in parentheses)
+    const firstRow = data[0];
+    const isFirstRowSubHeader = firstRow && scoreColumns.some(col => String(firstRow[col]).includes('('));
+    const dataToProcess = isFirstRowSubHeader ? data.slice(1) : data;
+
+    dataToProcess.forEach((row: any) => {
+      const studentName = findValue(row, ['studentname', 'name', 'student']);
       if (!studentName) return;
+
+      const rowSheetName = row.__sheetName || defaultSheetName;
 
       // Ensure student exists
       let student = newStudents.find(s => s.name === studentName && s.yearGroup === yearGroup);
@@ -388,11 +677,12 @@ const performances = useMemo(() => {
 
       if (hasAssessmentNameColumn) {
         // Row-based assessments
-        const rowAssessmentName = row.assessmentName || row.AssessmentName || defaultAssessmentName;
-        const rowSubject = row.subject || row.Subject || defaultSubject;
-        const rowMaxMarks = parseFloat(row.maxMarks || row.MaxMarks) || defaultMaxMarks;
-        const rowDate = row.date || row.Date || defaultDate;
-        const rowScore = parseFloat(row.score || row.mark || row.Score || row.Mark) || 0;
+        const rowAssessmentName = findValue(row, ['assessmentname']) || defaultAssessmentName;
+        const rowSubject = findValue(row, ['subject']) || defaultSubject;
+        const rowMaxMarks = parseFloat(findValue(row, ['maxmarks'])) || defaultMaxMarks;
+        const rowDate = findValue(row, ['date']) || defaultDate;
+        const rowScoreRaw = parseFloat(findValue(row, ['score', 'mark'])) || 0;
+        const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
 
         let assessment = newAssessments.find(a => a.name === rowAssessmentName && a.yearGroup === yearGroup && a.subject === rowSubject);
         if (!assessment) {
@@ -416,10 +706,12 @@ const performances = useMemo(() => {
       } else if (scoreColumns.length > 0) {
         // Column-based assessments
         scoreColumns.forEach(col => {
-          const rowScore = parseFloat(row[col]) || 0;
-          const rowAssessmentName = col;
+          if (row[col] === undefined) return;
+          
+          const rowScoreRaw = parseFloat(row[col]) || 0;
+          const { name: rowAssessmentName, maxMarks: rowMaxMarks } = extractInfo(col, isFirstRowSubHeader ? firstRow : null, rowSheetName);
+          const rowScore = Math.min(rowMaxMarks, Math.max(0, rowScoreRaw));
           const rowSubject = defaultSubject;
-          const rowMaxMarks = defaultMaxMarks;
           const rowDate = defaultDate;
 
           let assessment = newAssessments.find(a => a.name === rowAssessmentName && a.yearGroup === yearGroup && a.subject === rowSubject);
@@ -444,7 +736,8 @@ const performances = useMemo(() => {
         });
       } else {
         // Single assessment fallback
-        const rowScore = parseFloat(row.score || row.mark || row.Score || row.Mark) || 0;
+        const rowScoreRaw = parseFloat(findValue(row, ['score', 'mark'])) || 0;
+        const rowScore = Math.min(defaultMaxMarks, Math.max(0, rowScoreRaw));
         let assessment = newAssessments.find(a => a.name === defaultAssessmentName && a.yearGroup === yearGroup);
         if (!assessment) {
           assessment = { 
@@ -471,20 +764,7 @@ const performances = useMemo(() => {
     setStudents(newStudents);
     setAssessments(newAssessments);
     setMarks(newMarks);
-    await supabase
-  .from('student_data')
-  .insert(
-    newMarks.map(m => {
-      const student = newStudents.find(s => s.id === m.studentId)
-
-      return {
-        name: student?.name || '',
-        class: student?.groupName || '',
-        marks: m.score,
-        uploaded_by: "teacher"
-      }
-    })
-  )
+    
     setShowImportModal(false);
     setPendingImport(null);
     setSaveStatus('saved');
@@ -506,13 +786,11 @@ const performances = useMemo(() => {
     }
     setShowAssessmentModal(false);
     setEditingAssessmentId(null);
-    setNewAssessment({ 
+    setNewAssessment(prev => ({ 
+      ...prev,
       name: '', 
-      subject: 'Science', 
-      maxMarks: 100, 
-      date: new Date().toISOString().split('T')[0],
-      yearGroup: 7
-    });
+      // Keep subject, maxMarks, date, and yearGroup for convenience
+    }));
   };
 
   const handleAddStudent = (e: React.FormEvent) => {
@@ -523,7 +801,7 @@ const performances = useMemo(() => {
     };
     setStudents(prev => [...prev, student]);
     setShowStudentModal(false);
-    setNewStudent({ name: '', yearGroup: 7, groupName: '' });
+    setNewStudent(prev => ({ ...prev, name: '' })); // Keep yearGroup and groupName
   };
 
   const handleAddGrade = (isAssessment: boolean = false, assessmentId?: string) => {
@@ -544,9 +822,12 @@ const performances = useMemo(() => {
   };
 
   const handleUpdateMark = (studentId: string, assessmentId: string, score: number) => {
+    const assessment = assessments.find(a => a.id === assessmentId);
+    const maxMarks = assessment?.maxMarks || 100;
+    const validatedScore = Math.min(maxMarks, Math.max(0, score));
     setMarks(prev => {
       const filtered = prev.filter(m => !(m.studentId === studentId && m.assessmentId === assessmentId));
-      return [...filtered, { studentId, assessmentId, score }];
+      return [...filtered, { studentId, assessmentId, score: validatedScore }];
     });
   };
 
@@ -585,14 +866,15 @@ const performances = useMemo(() => {
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">EduTracker Pro</h1>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Teacher's Data Suite</p>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">Science Data Tracker</h1>
+              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Science Department</p>
             </div>
           </div>
           
           <nav className="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-2xl">
             {[
               { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+              { id: 'performance', icon: TrendingUp, label: 'Performance' },
               { id: 'students', icon: Users, label: 'Students' },
               { id: 'assessments', icon: Plus, label: 'Assessments' },
               { id: 'settings', icon: Settings, label: 'Settings' },
@@ -618,12 +900,34 @@ const performances = useMemo(() => {
               <select 
                 className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
                 value={yearFilter}
-                onChange={(e) => setYearFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value) as YearGroup)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'all') setYearFilter('all');
+                  else if (!isNaN(parseInt(val)) && val.length === 1) setYearFilter(parseInt(val) as YearGroup);
+                  else setYearFilter(val as YearGroup);
+                }}
               >
                 <option value="all">All Years</option>
-                {[7, 8, 9, 10, 11, 12, 13].map(y => <option key={y} value={y}>Year {y}</option>)}
+                <option value="IGCSE_ALL">IGCSE (All)</option>
+                <option value="IB_ALL">IB (All)</option>
+                {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                  <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                ))}
               </select>
             </div>
+            <button 
+              onClick={backupData}
+              className="btn-secondary flex items-center gap-2 text-sm"
+              title="Backup All Data"
+            >
+              <Download className="w-4 h-4" />
+              Backup
+            </button>
+            <label className="btn-secondary flex items-center gap-2 cursor-pointer text-sm">
+              <Upload className="w-4 h-4" />
+              Restore
+              <input type="file" accept=".json" onChange={restoreBackup} className="hidden" />
+            </label>
             <button 
               onClick={downloadTemplate}
               className="btn-secondary flex items-center gap-2 text-sm"
@@ -634,8 +938,8 @@ const performances = useMemo(() => {
             </button>
             <label className="btn-secondary flex items-center gap-2 cursor-pointer text-sm">
               <Upload className="w-4 h-4" />
-              Upload CSV
-              <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+              Upload CSV/Excel
+              <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
             </label>
           </div>
         </div>
@@ -651,52 +955,81 @@ const performances = useMemo(() => {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="card p-6 flex flex-col justify-between">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="card p-6 flex flex-col justify-between bg-gradient-to-br from-white to-slate-50">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Students</span>
-                    <Users className="w-5 h-5 text-indigo-500" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Students</span>
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+                      <Users className="w-4 h-4" />
+                    </div>
                   </div>
                   <div>
-                    <h2 className="text-3xl font-bold text-slate-900">{filteredPerformances.length}</h2>
-                    <p className="text-sm text-slate-500 mt-1">
+                    <h2 className="text-3xl font-bold text-slate-900 leading-none mb-1">{filteredPerformances.length}</h2>
+                    <p className="text-[10px] text-slate-500 font-medium">
                       {yearFilter === 'all' 
                         ? `Across ${new Set(students.map(s => s.yearGroup)).size} year groups`
-                        : `In Year ${yearFilter}`}
+                        : yearFilter === 'IGCSE_ALL' ? 'All IGCSE Students'
+                        : yearFilter === 'IB_ALL' ? 'All IB Students'
+                        : `In ${formatYearGroup(yearFilter as YearGroup)}`}
                     </p>
                   </div>
                 </div>
-                <div className="card p-6 flex flex-col justify-between">
+
+                <div className="card p-6 flex flex-col justify-between bg-gradient-to-br from-white to-slate-50">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Avg. Performance</span>
-                    <TrendingUp className="w-5 h-5 text-emerald-500" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Avg. Performance</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
                   </div>
                   <div>
-                    <h2 className="text-3xl font-bold text-slate-900">
+                    <h2 className="text-3xl font-bold text-slate-900 leading-none mb-1">
                       {(filteredPerformances.reduce((acc, p) => acc + p.averagePercentage, 0) / (filteredPerformances.length || 1)).toFixed(1)}%
                     </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                      {yearFilter === 'all' ? 'School-wide average' : `Year ${yearFilter} average`}
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      {yearFilter === 'all' ? 'School-wide average' 
+                        : yearFilter === 'IGCSE_ALL' ? 'IGCSE average'
+                        : yearFilter === 'IB_ALL' ? 'IB average'
+                        : `${formatYearGroup(yearFilter as YearGroup)} average`}
                     </p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => { setActiveTab('assessments'); setShowAssessmentModal(true); }}
-                  className="card p-6 flex flex-col justify-between hover:border-blue-200 transition-colors text-left"
-                >
+
+                <div className="card p-6 flex flex-col justify-between bg-gradient-to-br from-white to-slate-50">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-sm font-medium text-slate-500 uppercase tracking-wider">Assessments</span>
-                    <Plus className="w-5 h-5 text-blue-500" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Assessments</span>
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                      <BarChart3 className="w-4 h-4" />
+                    </div>
                   </div>
                   <div>
-                    <h2 className="text-3xl font-bold text-slate-900">
-                      {assessments.filter(a => yearFilter === 'all' || a.yearGroup === yearFilter).length}
+                    <h2 className="text-3xl font-bold text-slate-900 leading-none mb-1">
+                      {assessments.filter(a => matchesYearFilter(a.yearGroup, yearFilter)).length}
                     </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                      {yearFilter === 'all' ? 'Total recorded tests' : `Tests for Year ${yearFilter}`}
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      {yearFilter === 'all' ? 'Total recorded tests' : 
+                       yearFilter === 'IGCSE_ALL' ? 'Total IGCSE tests' :
+                       yearFilter === 'IB_ALL' ? 'Total IB tests' :
+                       `Tests for ${formatYearGroup(yearFilter as YearGroup)}`}
                     </p>
                   </div>
-                </button>
+                </div>
+
+                <div className="card p-6 flex flex-col justify-between bg-indigo-600 text-white border-none shadow-lg shadow-indigo-200">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">Quick Action</span>
+                    <Plus className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <button 
+                      onClick={() => { setActiveTab('assessments'); setShowAssessmentModal(true); }}
+                      className="text-lg font-bold hover:underline text-left leading-tight"
+                    >
+                      Create New Assessment
+                    </button>
+                    <p className="text-[10px] text-indigo-200 font-medium mt-1">Record new student marks</p>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -785,6 +1118,344 @@ const performances = useMemo(() => {
             </motion.div>
           )}
 
+          {activeTab === 'performance' && (
+            <motion.div 
+              key="performance"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Performance Analytics</h2>
+                  <p className="text-xs text-slate-500 font-medium">In-depth analysis of student progress and subject trends</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                    <Users className="w-4 h-4 text-slate-400" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Student</span>
+                    <select 
+                      className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer min-w-[150px]"
+                      value={selectedStudentForPerformance}
+                      onChange={(e) => setSelectedStudentForPerformance(e.target.value)}
+                    >
+                      <option value="none">Select Student...</option>
+                      {students
+                        .filter(s => matchesYearFilter(s.yearGroup, yearFilter))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                    <Filter className="w-4 h-4 text-slate-400" />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subject</span>
+                    <select 
+                      className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer min-w-[120px]"
+                      value={performanceSubjectFilter}
+                      onChange={(e) => setPerformanceSubjectFilter(e.target.value)}
+                    >
+                      <option value="all">All Subjects</option>
+                      {Array.from(new Set(assessments.map(a => a.subject))).map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="card p-4 flex items-center gap-4 bg-white">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selected Average</p>
+                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.average.toFixed(1) || '0.0'}%</h4>
+                  </div>
+                </div>
+                <div className="card p-4 flex items-center gap-4 bg-white">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Best Group</p>
+                    <h4 className="text-xl font-bold text-slate-900">{performanceInsights?.bestGroup?.name || 'N/A'}</h4>
+                    <p className="text-[10px] text-emerald-600 font-bold">{performanceInsights?.bestGroup?.avg.toFixed(1)}% Avg</p>
+                  </div>
+                </div>
+                <div className="card p-4 flex items-center gap-4 bg-white">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Most Improved</p>
+                    <h4 className="text-xl font-bold text-slate-900 truncate max-w-[150px]">{performanceInsights?.mostImproved?.name || 'N/A'}</h4>
+                    <p className="text-[10px] text-amber-600 font-bold">+{performanceInsights?.mostImproved?.improvement.toFixed(1)}% Growth</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Left Column: Top Performers & Needs Support */}
+                <div className="lg:col-span-1 space-y-6">
+                  <div className="card p-6 bg-gradient-to-b from-white to-emerald-50/30">
+                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center">
+                        <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+                      </div>
+                      Top Performers
+                    </h3>
+                    <div className="space-y-3">
+                      {topPerformersList.length > 0 ? topPerformersList.map((p, idx) => (
+                        <button 
+                          key={p.student.id} 
+                          onClick={() => setSelectedStudentForPerformance(p.student.id)}
+                          className={`w-full flex items-center justify-between p-2 rounded-lg transition-all hover:shadow-sm border border-transparent hover:border-slate-100 ${selectedStudentForPerformance === p.student.id ? 'bg-white shadow-sm border-slate-100' : 'hover:bg-white'}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] font-bold text-slate-300 w-4">{idx + 1}</span>
+                            <div className="min-w-0 text-left">
+                              <p className="text-xs font-bold text-slate-900 truncate">{p.student.name}</p>
+                              <p className="text-[10px] text-slate-500">{p.student.groupName}</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-100">
+                            {p.averagePercentage.toFixed(1)}%
+                          </span>
+                        </button>
+                      )) : (
+                        <p className="text-xs text-slate-400 italic text-center py-4">No data available</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="card p-6 bg-gradient-to-b from-white to-rose-50/30">
+                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-rose-100 flex items-center justify-center">
+                        <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
+                      </div>
+                      Needs Support
+                    </h3>
+                    <div className="space-y-3">
+                      {needsSupportList.length > 0 ? needsSupportList.map((p, idx) => (
+                        <button 
+                          key={p.student.id} 
+                          onClick={() => setSelectedStudentForPerformance(p.student.id)}
+                          className={`w-full flex items-center justify-between p-2 rounded-lg transition-all hover:shadow-sm border border-transparent hover:border-slate-100 ${selectedStudentForPerformance === p.student.id ? 'bg-white shadow-sm border-slate-100' : 'hover:bg-white'}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] font-bold text-slate-300 w-4">{idx + 1}</span>
+                            <div className="min-w-0 text-left">
+                              <p className="text-xs font-bold text-slate-900 truncate">{p.student.name}</p>
+                              <p className="text-[10px] text-slate-500">{p.student.groupName}</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-100">
+                            {p.averagePercentage.toFixed(1)}%
+                          </span>
+                        </button>
+                      )) : (
+                        <p className="text-xs text-slate-400 italic text-center py-4">No data available</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="card p-6">
+                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-indigo-500" />
+                      Grade Distribution
+                    </h3>
+                    <div className="space-y-4">
+                      {[
+                        { label: 'A*/A', count: performanceTabStats.filter(p => p.averagePercentage >= 80).length, color: 'bg-emerald-500' },
+                        { label: 'B/C', count: performanceTabStats.filter(p => p.averagePercentage >= 60 && p.averagePercentage < 80).length, color: 'bg-blue-500' },
+                        { label: 'D/E', count: performanceTabStats.filter(p => p.averagePercentage >= 40 && p.averagePercentage < 60).length, color: 'bg-amber-500' },
+                        { label: 'U', count: performanceTabStats.filter(p => p.averagePercentage < 40).length, color: 'bg-rose-500' },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <div className="flex justify-between text-[10px] mb-1.5">
+                            <span className="font-bold text-slate-600 uppercase tracking-tighter">{item.label}</span>
+                            <span className="text-slate-400 font-bold">{item.count} students</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(item.count / (performanceTabStats.length || 1)) * 100}%` }}
+                              className={`${item.color} h-full`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Detailed Charts */}
+                <div className="lg:col-span-3 space-y-6">
+                  {selectedStudentForPerformance !== 'none' && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="card p-6 border-indigo-100 bg-indigo-50/10"
+                    >
+                      <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center justify-between">
+                        <span>
+                          Individual Progress: <span className="text-indigo-600">{students.find(s => s.id === selectedStudentForPerformance)?.name}</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Personal Trend</span>
+                          <button 
+                            onClick={() => setSelectedStudentForPerformance('none')}
+                            className="text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </h3>
+                      <div className="h-[300px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={individualStudentTrendData}>
+                            <defs>
+                              <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                            <XAxis 
+                              dataKey="date" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fill: '#64748b', fontSize: 11 }} 
+                            />
+                            <YAxis 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fill: '#64748b', fontSize: 11 }} 
+                              domain={[0, 100]} 
+                            />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              formatter={(value: number, name: string, props: any) => [
+                                `${value.toFixed(1)}%`, 
+                                `${props.payload.assessmentName} (${props.payload.subject})`
+                              ]}
+                            />
+                            <Area 
+                              type="monotone" 
+                              dataKey="score" 
+                              stroke="#6366f1" 
+                              strokeWidth={3}
+                              fillOpacity={1} 
+                              fill="url(#colorScore)" 
+                              dot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#6366f1' }}
+                              activeDot={{ r: 6, strokeWidth: 0 }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  <div className="card p-6">
+                    <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center justify-between">
+                      Assessment Trend Analysis
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Average performance over time</span>
+                    </h3>
+                    <div className="h-[350px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={subjectTrendData.filter(d => performanceSubjectFilter === 'all' || d.subject === performanceSubjectFilter)}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="date" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#64748b', fontSize: 11 }} 
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fill: '#64748b', fontSize: 11 }} 
+                            domain={[0, 100]} 
+                          />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                          />
+                          <Legend verticalAlign="top" align="right" iconType="circle" height={36}/>
+                          {(Array.from(new Set(subjectTrendData.map(d => d.subject))) as string[])
+                            .filter(subject => performanceSubjectFilter === 'all' || subject === performanceSubjectFilter)
+                            .map((subject) => (
+                            <Line 
+                              key={subject}
+                              type="monotone" 
+                              dataKey="average" 
+                              data={subjectTrendData.filter(d => d.subject === subject)}
+                              name={subject}
+                              stroke={SUBJECT_COLORS[subject] || '#6366f1'} 
+                              strokeWidth={3}
+                              dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                              activeDot={{ r: 6, strokeWidth: 0 }}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="card p-6">
+                      <h3 className="text-sm font-bold text-slate-900 mb-6 flex items-center justify-between">
+                        Subject Comparison
+                        <BarChart3 className="w-4 h-4 text-slate-300" />
+                      </h3>
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={subjectPerformanceData} layout="vertical">
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                            <XAxis type="number" domain={[0, 100]} hide />
+                            <YAxis dataKey="subject" type="category" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            />
+                            <Bar dataKey="average" radius={[0, 4, 4, 0]} barSize={20}>
+                              {subjectPerformanceData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={SUBJECT_COLORS[entry.subject] || '#6366f1'} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card p-6">
+                      <h3 className="text-sm font-bold text-slate-900 mb-6 flex items-center justify-between">
+                        Group Performance Gap
+                        <Users className="w-4 h-4 text-slate-300" />
+                      </h3>
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={groupPerformanceData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis dataKey="group" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} domain={[0, 100]} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            />
+                            <Bar dataKey="average" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={30} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {activeTab === 'students' && (
             <motion.div 
               key="students"
@@ -797,7 +1468,16 @@ const performances = useMemo(() => {
               <div className="lg:col-span-1 space-y-4">
                 <div className="flex flex-col gap-2">
                   <button 
-                    onClick={() => setShowStudentModal(true)}
+                    onClick={() => {
+                      const defaultYear = (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') ? yearFilter : newStudent.yearGroup;
+                      const firstGroup = groups.find(g => g.yearGroup === defaultYear)?.name || '';
+                      setNewStudent(prev => ({ 
+                        ...prev, 
+                        yearGroup: defaultYear, 
+                        groupName: prev.groupName || firstGroup 
+                      }));
+                      setShowStudentModal(true);
+                    }}
                     className="btn-primary w-full flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
@@ -816,8 +1496,8 @@ const performances = useMemo(() => {
                 </div>
 
                 <div className="card max-h-[calc(100vh-250px)] overflow-y-auto divide-y divide-slate-100">
-                  {[7, 8, 9, 10, 11, 12, 13]
-                    .filter(y => yearFilter === 'all' || y === yearFilter)
+                  {([7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'] as YearGroup[])
+                    .filter(y => matchesYearFilter(y, yearFilter))
                     .map(year => {
                       const yearStudents = filteredPerformances.filter(p => p.student.yearGroup === year);
                       const definedGroups = groups.filter(g => g.yearGroup === year).map(g => g.name);
@@ -829,7 +1509,7 @@ const performances = useMemo(() => {
                       return (
                         <div key={year} className="bg-white">
                           <div className="px-4 py-2 bg-slate-50 border-y border-slate-100">
-                            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Year {year}</h4>
+                            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{typeof year === 'number' ? `Year ${year}` : year}</h4>
                           </div>
                           {yearGroups.map(groupName => {
                             const groupStudents = yearStudents.filter(p => p.student.groupName === groupName);
@@ -884,7 +1564,7 @@ const performances = useMemo(() => {
                           <div className="flex items-center justify-between mb-8">
                             <div>
                               <h2 className="text-2xl font-bold text-slate-900">{p.student.name}</h2>
-                              <p className="text-slate-500">Year {p.student.yearGroup} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
+                              <p className="text-slate-500">{formatYearGroup(p.student.yearGroup)} • Overall Average: {p.averagePercentage.toFixed(1)}%</p>
                             </div>
                           </div>
 
@@ -974,7 +1654,15 @@ const performances = useMemo(() => {
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-slate-900">Assessments & Marks</h2>
                 <button 
-                  onClick={() => setShowAssessmentModal(true)}
+                  onClick={() => {
+                    const defaultYear = (yearFilter !== 'all' && yearFilter !== 'IGCSE_ALL' && yearFilter !== 'IB_ALL') ? yearFilter : newAssessment.yearGroup;
+                    setNewAssessment(prev => ({ 
+                      ...prev, 
+                      yearGroup: defaultYear,
+                      subject: prev.yearGroup === defaultYear ? prev.subject : SUBJECTS_BY_YEAR[defaultYear][0]
+                    }));
+                    setShowAssessmentModal(true);
+                  }}
                   className="btn-primary flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
@@ -982,8 +1670,44 @@ const performances = useMemo(() => {
                 </button>
               </div>
 
+              <div className="flex flex-wrap items-center gap-2 pb-2">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'IGCSE_ALL', label: 'IGCSE' },
+                    { id: 'IB_ALL', label: 'IB' },
+                    { id: 7, label: 'Y7' },
+                    { id: 8, label: 'Y8' },
+                    { id: 9, label: 'Y9' },
+                    { id: '10 IGCSE', label: 'Y10' },
+                    { id: '11 IGCSE', label: 'Y11' },
+                    { id: '12 IB', label: 'Y12' },
+                    { id: '13 IB', label: 'Y13' },
+                  ].map((filter) => (
+                    <button
+                      key={filter.id}
+                      onClick={() => {
+                        if (filter.id === 'all') setYearFilter('all');
+                        else if (filter.id === 'IGCSE_ALL') setYearFilter('IGCSE_ALL');
+                        else if (filter.id === 'IB_ALL') setYearFilter('IB_ALL');
+                        else setYearFilter(filter.id as YearGroup);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        yearFilter === filter.id 
+                          ? 'bg-white text-indigo-600 shadow-sm' 
+                          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {assessments.map(assessment => (
+                {assessments
+                  .filter(a => matchesYearFilter(a.yearGroup, yearFilter))
+                  .map(assessment => (
                   <div key={assessment.id} className="card p-6 hover:border-indigo-200 transition-colors group">
                     <div className="flex justify-between items-start mb-4">
                       <div>
@@ -997,7 +1721,9 @@ const performances = useMemo(() => {
                           {assessment.subject}
                         </span>
                         <h3 className="text-lg font-bold text-slate-900">{assessment.name}</h3>
-                        <p className="text-sm text-slate-500">Year {assessment.yearGroup} • {assessment.date}</p>
+                        <p className="text-sm text-slate-500">
+                          {formatYearGroup(assessment.yearGroup)} • {assessment.date}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1">
                         <button 
@@ -1075,9 +1801,15 @@ const performances = useMemo(() => {
                   <select 
                     className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500"
                     value={selectedYearForSettings}
-                    onChange={(e) => setSelectedYearForSettings(parseInt(e.target.value) as YearGroup)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!isNaN(parseInt(val)) && val.length === 1) setSelectedYearForSettings(parseInt(val) as YearGroup);
+                      else setSelectedYearForSettings(val as YearGroup);
+                    }}
                   >
-                    {[7, 8, 9, 10, 11, 12, 13].map(y => <option key={y} value={y}>Year {y}</option>)}
+                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                      <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1107,7 +1839,22 @@ const performances = useMemo(() => {
                           <div className="flex-1">
                             <div className="flex justify-between text-sm mb-1">
                               <span className="text-slate-500">Minimum Percentage</span>
-                              <span className="font-bold text-slate-900">{boundary.minPercentage}%</span>
+                              <div className="flex items-center gap-1">
+                                <input 
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={boundary.minPercentage}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value) || 0;
+                                    const newBoundaries = [...yearBoundaries[selectedYearForSettings]];
+                                    newBoundaries[originalIdx].minPercentage = Math.min(100, Math.max(0, val));
+                                    setYearBoundaries(prev => ({ ...prev, [selectedYearForSettings]: newBoundaries }));
+                                  }}
+                                  className="w-14 px-1.5 py-0.5 text-right font-bold text-slate-900 border border-slate-200 rounded-md outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                                />
+                                <span className="font-bold text-slate-900">%</span>
+                              </div>
                             </div>
                             <input 
                               type="range" 
@@ -1231,8 +1978,8 @@ const performances = useMemo(() => {
                       </button>
                       <label className="btn-secondary flex items-center justify-center gap-2 cursor-pointer">
                         <Upload className="w-4 h-4" />
-                        Upload Completed CSV
-                        <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                        Upload Completed File
+                        <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
                       </label>
                     </div>
                   </div>
@@ -1275,7 +2022,8 @@ const performances = useMemo(() => {
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                       value={newAssessment.yearGroup}
                       onChange={e => {
-                        const year = parseInt(e.target.value) as YearGroup;
+                        const val = e.target.value;
+                        const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
                         setNewAssessment({
                           ...newAssessment, 
                           yearGroup: year,
@@ -1283,7 +2031,9 @@ const performances = useMemo(() => {
                         });
                       }}
                     >
-                      {[7, 8, 9, 10, 11, 12, 13].map(y => <option key={y} value={y}>Year {y}</option>)}
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                        <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -1337,13 +2087,7 @@ const performances = useMemo(() => {
                     onClick={() => {
                       setShowAssessmentModal(false);
                       setEditingAssessmentId(null);
-                      setNewAssessment({ 
-                        name: '', 
-                        subject: 'Science', 
-                        maxMarks: 100, 
-                        date: new Date().toISOString().split('T')[0],
-                        yearGroup: 7
-                      });
+                      // We don't reset to Year 7 here anymore to preserve context
                     }} 
                     className="btn-secondary flex-1"
                   >
@@ -1384,12 +2128,15 @@ const performances = useMemo(() => {
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
                     value={newStudent.yearGroup}
                     onChange={e => {
-                      const year = parseInt(e.target.value) as YearGroup;
+                      const val = e.target.value;
+                      const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
                       const firstGroup = groups.find(g => g.yearGroup === year)?.name || '';
                       setNewStudent({...newStudent, yearGroup: year, groupName: firstGroup});
                     }}
                   >
-                    {[7, 8, 9, 10, 11, 12, 13].map(y => <option key={y} value={y}>Year {y}</option>)}
+                    {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                      <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -1484,6 +2231,8 @@ const performances = useMemo(() => {
                                   placeholder="Score"
                                   className="w-14 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] outline-none focus:ring-2 focus:ring-indigo-500"
                                   value={mark?.score ?? ''}
+                                  min="0"
+                                  max={assessments.find(a => a.id === showMarksModal)?.maxMarks || 100}
                                   onChange={e => handleUpdateMark(student.id, showMarksModal, parseFloat(e.target.value) || 0)}
                                 />
                                 <span className="text-[9px] font-bold text-slate-400 w-7 text-right">
@@ -1530,7 +2279,22 @@ const performances = useMemo(() => {
                               <div className="flex-1">
                                 <div className="flex justify-between text-[10px] mb-1">
                                   <span className="text-slate-500">Min %</span>
-                                  <span className="font-bold text-slate-900">{boundary.minPercentage}%</span>
+                                  <div className="flex items-center gap-1">
+                                    <input 
+                                      type="number"
+                                      min="0"
+                                      max="100"
+                                      value={boundary.minPercentage}
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0;
+                                        const currentBoundaries = [...sourceBoundaries];
+                                        currentBoundaries[originalIdx].minPercentage = Math.min(100, Math.max(0, val));
+                                        setAssessments(prev => prev.map(a => a.id === showMarksModal ? { ...a, boundaries: currentBoundaries } : a));
+                                      }}
+                                      className="w-12 px-1 py-0.5 text-right font-bold text-slate-900 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-indigo-500 text-[10px]"
+                                    />
+                                    <span className="font-bold text-slate-900 text-[10px]">%</span>
+                                  </div>
                                 </div>
                                 <input 
                                   type="range" 
@@ -1601,11 +2365,14 @@ const performances = useMemo(() => {
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
                       value={importConfig.yearGroup}
                       onChange={e => {
-                        const year = parseInt(e.target.value) as YearGroup;
+                        const val = e.target.value;
+                        const year = (!isNaN(parseInt(val)) && val.length === 1) ? parseInt(val) as YearGroup : val as YearGroup;
                         setImportConfig({ ...importConfig, yearGroup: year, subject: SUBJECTS_BY_YEAR[year][0] });
                       }}
                     >
-                      {[7, 8, 9, 10, 11, 12, 13].map(y => <option key={y} value={y}>Year {y}</option>)}
+                      {[7, 8, 9, '10 IGCSE', '11 IGCSE', '12 IB', '13 IB'].map(y => (
+                        <option key={y} value={y}>{typeof y === 'number' ? `Year ${y}` : y}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
