@@ -127,39 +127,41 @@ export default function App() {
   const [selectedStudentForPerformance, setSelectedStudentForPerformance] = useState<string | 'none'>('none');
 
   // ─── LOAD DATA FROM SUPABASE ON MOUNT ──────────────────────────────────────
-const loadData = async () => {
-  const { data, error } = await supabase
-    .from("app_data")
-    .select("*")
-    .eq("id", 1)
-    .single();
+useEffect(() => {
+  const loadData = async () => {
+    const { data, error } = await supabase
+      .from("app_data")
+      .select("*")
+      .eq("id", 1)
+      .single();
 
-  if (error) {
-    console.error("Supabase load error:", error);
+    if (error) {
+      console.error("Supabase load error:", error);
+      setIsLoading(false);
+      return;
+    }
+
+    if (data?.data) {
+      const parsed = data.data;
+
+      setStudents(parsed.students || []);
+      setAssessments(parsed.assessments || []);
+      setMarks(parsed.marks || []);
+      setGroups(parsed.groups || []);
+      setYearBoundaries(parsed.yearBoundaries || {
+        7: [...DEFAULT_BOUNDARIES],
+        8: [...DEFAULT_BOUNDARIES],
+        9: [...DEFAULT_BOUNDARIES],
+        "10 IGCSE": [...DEFAULT_BOUNDARIES],
+        "11 IGCSE": [...DEFAULT_BOUNDARIES],
+        "12 IB": [...DEFAULT_BOUNDARIES],
+        "13 IB": [...DEFAULT_BOUNDARIES],
+      });
+    }
+
     setIsLoading(false);
-    return;
-  }
+  };
 
-  if (data?.data) {
-    const parsed = data.data;
-
-    setStudents(parsed.students || []);
-    setAssessments(parsed.assessments || []);
-    setMarks(parsed.marks || []);
-    setGroups(parsed.groups || []);
-    setYearBoundaries(parsed.yearBoundaries || {
-      7: [...DEFAULT_BOUNDARIES],
-      8: [...DEFAULT_BOUNDARIES],
-      9: [...DEFAULT_BOUNDARIES],
-      "10 IGCSE": [...DEFAULT_BOUNDARIES],
-      "11 IGCSE": [...DEFAULT_BOUNDARIES],
-      "12 IB": [...DEFAULT_BOUNDARIES],
-      "13 IB": [...DEFAULT_BOUNDARIES],
-    });
-  }
-
-  setIsLoading(false);
-};
   loadData();
 }, []);
 
