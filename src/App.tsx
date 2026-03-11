@@ -280,19 +280,7 @@ export default function App() {
     });
   }, [performances, searchQuery, yearFilter]);
 
-  const topPerformers = useMemo(() => {
-    return [...filteredPerformances]
-      .filter(p => p.marks.length > 0)
-      .sort((a, b) => b.averagePercentage - a.averagePercentage)
-      .slice(0, 5);
-  }, [filteredPerformances]);
-
-  const needsSupport = useMemo(() => {
-    return [...filteredPerformances]
-      .filter(p => p.marks.length > 0)
-      .sort((a, b) => a.averagePercentage - b.averagePercentage)
-      .slice(0, 5);
-  }, [filteredPerformances]);
+  
 
   const performanceTabStats = useMemo(() => {
     return students.map(student => {
